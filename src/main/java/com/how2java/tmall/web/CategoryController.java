@@ -69,8 +69,10 @@ public class CategoryController {
 
     @PutMapping("/categories/{id}")
     public Object update(Category bean, MultipartFile image,HttpServletRequest request) throws Exception {
+        //reque获取参数
         String name = request.getParameter("name");
         System.out.println(bean.getName());
+        //赋值给Category对象
         bean.setName(name);
         System.out.println(bean.getName());
         categoryService.update(bean);
