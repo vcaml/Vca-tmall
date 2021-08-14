@@ -11,4 +11,6 @@ import com.how2java.tmall.pojo.User;
 public interface OrderItemDAO extends JpaRepository<OrderItem,Integer>{
     //这种方式在命名里提供OrderByIdDesc，就进行到排序了，就可以不用传Sort参数了。
     List<OrderItem> findByOrderOrderByIdDesc(Order order);
+    List<OrderItem> findByProduct(Product product);
+    List<OrderItem> findByUserAndOrderIsNull(User user);
 }
