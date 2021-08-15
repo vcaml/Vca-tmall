@@ -74,7 +74,8 @@ public class ForePageController {
         return "fore/search";
     }
     @GetMapping("/forelogout")
-    public String logout( ) {
+    public String logout(HttpSession session) {
+        session.removeAttribute("user");
         return "redirect:home";
     }
 }

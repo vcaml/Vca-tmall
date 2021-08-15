@@ -4,6 +4,7 @@ import com.how2java.tmall.comparator.*;
 import com.how2java.tmall.pojo.*;
 import com.how2java.tmall.service.*;
 import com.how2java.tmall.util.Result;
+import org.apache.commons.lang.math.RandomUtils;
 import org.apache.shiro.crypto.SecureRandomNumberGenerator;
 import org.apache.shiro.crypto.hash.SimpleHash;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpSession;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 @RestController
@@ -29,6 +31,8 @@ public class ForeRESTController {
     OrderItemService orderItemService;
     @Autowired
     ReviewService reviewService;
+    @Autowired
+    OrderService orderService;
 
     @GetMapping("/forehome")
     public Object home(){
@@ -157,7 +161,7 @@ public class ForeRESTController {
         Product product =productService.get(pid);
         int orderItemId =0;
 
-        User user =(User) session.getAttribute("uesr");
+        User user =(User) session.getAttribute("user");
         boolean found =false;
         //根据此时的user 查找orderItem表中uesr对应的没有生成order的orderItem项
         List<OrderItem> orderItems = orderItemService.listByUser(user);
@@ -189,6 +193,7 @@ public class ForeRESTController {
         float total=0;
 
         //用字符串数组是因为可能不止一个订单项
+        //创建list 根据id找到所有订单项加入list内 total计算所有价格总和
         for (String strid : oiid) {
             int id = Integer.parseInt(strid);
             OrderItem oi= orderItemService.get(id);
@@ -206,4 +211,149 @@ public class ForeRESTController {
 
     }
 
+    @GetMapping("foreaddCart")
+    public Object addCart(int pid, int num, HttpSession session){
+            buyoneAndAddCart(pid,num,session);
+            return Result.success();
+    }
+
+    @GetMapping("forecart")
+    public Object Cart(HttpSession session){
+        User user =(User)  session.getAttribute("user");
+        List<OrderItem> ois = orderItemService.listByUser(user);
+        productImageService.setFirstProdutImagesOnOrderItems(ois);
+        return ois;
+    }
+
+    @GetMapping("forechangeOrderItem")
+    public Object changeOrderItem( HttpSession session, int pid, int num) {
+        User user =(User)  session.getAttribute("user");
+        if(null==user) return Result.fail("未登录");
+
+        List<OrderItem> ois = orderItemService.listByUser(user);
+        for (OrderItem oi : ois) {
+            if(oi.getProduct().getId()==pid&&oi.getUser().getId()==user.getId()){
+                oi.setNumber(num);
+                orderItemService.update(oi);
+                break;
+            }
+        }
+        return Result.success();
+    }
+
+    @GetMapping("foredeleteOrderItem")
+    public Object deleteOrderItem(HttpSession session,int oiid){
+        User user =(User)  session.getAttribute("user");
+        if(null==user) return Result.fail("未登录");
+
+        orderItemService.delete(oiid);
+        return Result.success();
+    }
+
+    @PostMapping("forecreateOrder")
+    public Object createOrder(@RequestBody Order order,HttpSession session){
+        User user =(User)  session.getAttribute("user");
+        if(null==user)
+            return Result.fail("未登录");
+        //生成随机的订单码作为code
+        String orderCode = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date()) + RandomUtils.nextInt(10000);
+        order.setOrderCode(orderCode);
+        order.setCreateDate(new Date());
+        order.setUser(user);
+        //改变订单状态为 待支付
+        order.setStatus(OrderService.waitPay);
+
+        List<OrderItem> ois= (List<OrderItem>)session.getAttribute("ois");
+
+        float total =orderService.add(order,ois);
+        Map<String,Object> map = new HashMap<>();
+        map.put("oid", order.getId());
+        map.put("total", total);
+
+        return Result.success(map);
+    }
+
+    @GetMapping("forepayed")
+    public Object payed(int oid) {
+        Order order = orderService.get(oid);
+        order.setStatus(OrderService.waitDelivery);
+        order.setPayDate(new Date());
+        orderService.update(order);
+        return order;
+    }
+
+    @GetMapping("forebought")
+    public Object bought(HttpSession session) {
+        User user =(User)  session.getAttribute("user");
+        if(null==user)
+            return Result.fail("未登录");
+        List<Order> os= orderService.listByUserWithoutDelete(user);
+        orderService.removeOrderFromOrderItem(os);
+        return os;
+    }
+
+    @GetMapping("foreconfirmPay")
+    public Object confirmPay(int oid) {
+        Order o = orderService.get(oid);
+        orderItemService.fill(o);
+        orderService.cacl(o);
+        orderService.removeOrderFromOrderItem(o);
+        return o;
+    }
+
+    @GetMapping("foreorderConfirmed")
+    public Object orderConfirmed( int oid) {
+        Order o = orderService.get(oid);
+        o.setStatus(OrderService.waitReview);
+        o.setConfirmDate(new Date());
+        orderService.update(o);
+        return Result.success();
+    }
+
+    @PutMapping("foredeleteOrder")
+    public Object deleteOrder(int oid ,HttpSession session){
+        User user =(User)  session.getAttribute("user");
+        if(null==user)
+            return Result.fail("未登录");
+        Order o = orderService.get(oid);
+        o.setStatus(OrderService.delete);
+        orderService.update(o);
+        return Result.success();
+    }
+
+    @GetMapping("forereview")
+    public Object review(int oid) {
+        Order order = orderService.get(oid);
+        orderItemService.fill(order);
+        orderService.removeOrderFromOrderItem(order);
+        Product p = order.getOrderItems().get(0).getProduct();
+        List<Review> reviews = reviewService.list(p);
+        productService.setSaleAndReviewNumber(p);
+        Map<String,Object> map = new HashMap<>();
+        map.put("p", p);
+        map.put("o", order);
+        map.put("reviews", reviews);
+        return Result.success(map);
+    }
+
+    @PostMapping("foredoreview")
+    public Object doreview( HttpSession session,int oid,int pid,String content) {
+        Order o = orderService.get(oid);
+        o.setStatus(OrderService.finish);
+        orderService.update(o);
+
+        Product p = productService.get(pid);
+        content = HtmlUtils.htmlEscape(content);
+
+        User user =(User) session.getAttribute("user");
+        if(null==user)
+            return Result.fail("未登录");
+        Review review = new Review();
+        review.setContent(content);
+        review.setProduct(p);
+        review.setCreateDate(new Date());
+        review.setUser(user);
+        reviewService.add(review);
+        return Result.success();
+    }
 }
